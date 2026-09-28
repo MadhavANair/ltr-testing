@@ -1,0 +1,36 @@
+# Virtual environments
+venv/
+venv2/
+env/
+.venv/
+ENV/
+
+# Python packages / build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# Data files (large local data drop — not pushed)
+data/
+
+# Trained models
+Models/
+
+# Generated upload payloads
+export/
+
+# Reference notebooks (exploratory, not part of the pipeline)
+references folder/
+
+# Claude Code local config
+.claude/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Stray/empty artifacts
+upload-model
