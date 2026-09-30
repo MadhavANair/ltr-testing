@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# log -> split -> train. Stops at the model; no evaluation, no promotion.
+# log -> split -> train. Stops at the model.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

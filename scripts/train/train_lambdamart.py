@@ -47,27 +47,6 @@ def verify_feature_widths(judgments, features, source_label):
     return errors
 
 
-def train(train_judgments, val_judgments, model_path, trees, leafs, shrinkage,
-          mls, metric, tc=None, estop=None):
-    kwargs = dict(
-        training_set=train_judgments,
-        out=model_path,
-        ranker=6,
-        leafs=leafs,
-        trees=trees,
-        shrinkage=shrinkage,
-        metric2t=metric,
-        metric2T=metric,
-        validation_set=val_judgments,
-        mls=mls,
-    )
-    if tc is not None:
-        kwargs['tc'] = tc
-    if estop is not None:
-        kwargs['estop'] = estop
-    return trainModel(**kwargs)
-
-
 def build_impacts_by_name(log, features):
     # RankLib keys impacts by 1-based index as a string; this repo's fmap is
     # 0-based, so without the offset the report blames the neighbouring feature.
@@ -143,10 +122,11 @@ def main(argv=None):
     timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
     model_path = os.path.join(args.out_dir, '%s_%s.txt' % (args.name, timestamp))
 
-    estop = args.estop if args.estop else None
-    result = train(train_judgments, val_judgments, model_path,
-                   trees=args.trees, leafs=args.leaf, shrinkage=args.shrinkage,
-                   mls=args.mls, metric=args.metric, tc=args.tc, estop=estop)
+    estop = args.estop or None
+    result = trainModel(training_set=train_judgments, validation_set=val_judgments,
+                        out=model_path, ranker=6, trees=args.trees, leafs=args.leaf,
+                        shrinkage=args.shrinkage, mls=args.mls, tc=args.tc, estop=estop,
+                        metric2t=args.metric, metric2T=args.metric)
 
     if not result.trainingLogs:
         print("ERROR ranklib produced no training log; check the jar output above",
@@ -161,7 +141,7 @@ def main(argv=None):
 
     impacts_by_name = build_impacts_by_name(log, FEATURES)
 
-    print("\n=== provenance (printed only — this run writes no sidecar) ===", file=sys.stderr)
+    print("\n=== provenance ===", file=sys.stderr)
     print("trained at       : %s" % datetime.now(timezone.utc).isoformat(), file=sys.stderr)
     print("git sha          : %s" % git_sha(REPO_ROOT), file=sys.stderr)
     print("train judgments  : %d (%s)" % (len(train_judgments), args.train), file=sys.stderr)

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Uploads a trained model to local OpenSearch (after local-dev/scripts/create-index)
-# and checks the cluster can load and score it. Usage: ./upload-model [Models/<model>.txt]
+# and checks the cluster can load and score it. Usage: ./scripts/upload-model [Models/<model>.txt]
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 OS_URL="${OS_URL:-http://localhost:9201}"
 INDEX="images"

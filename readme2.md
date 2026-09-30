@@ -22,7 +22,7 @@ java -version
 | `scripts/val/tune.py` | Bayesian search over shrinkage/leaf/mls/estop, then one retrain of the winner for an absolute NDCG check | `Models/tuning/tuning_report.json` |
 | `scripts/test/evaluate.py` | manual, standalone: actual-vs-predicted NDCG@k on any model + any split. Nothing calls this automatically | stderr; optional CSV via `--out` |
 | `scripts/export_model/export_model.py` | builds the `_createmodel` request body | `export/<model>_model_body.json` |
-| `./upload-model` | uploads the latest model to local OpenSearch and checks it loads and scores (run after `local-dev/scripts/create-index`) | model in `.ltrstore` |
+| `./scripts/upload-model` | uploads the latest model to local OpenSearch and checks it loads and scores (run after `local-dev/scripts/create-index`) | model in `.ltrstore` |
 
 Everything runs offline against the data drop — no live search API involved.
 

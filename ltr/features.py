@@ -47,14 +47,8 @@ FEATURES = [
 ]
 
 
-def feature_names(features=FEATURES):
-    return [f.name for f in features]
-
-
 def feature_list_hash(features=FEATURES):
-    """Stable hash of feature names in order. Changes iff the contract
-    changes — compare this between training time and export/query time
-    to catch a silent feature-order divergence before it ships."""
+    """Stable hash of feature names in order; changes iff the contract changes."""
     h = hashlib.sha256()
     for f in features:
         h.update(f.name.encode('utf-8'))

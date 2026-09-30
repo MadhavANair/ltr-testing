@@ -10,7 +10,7 @@ re-logging of the same queries without having to be pinned by hand; a
 deliberate full re-split is forced only by changing --seed-salt.
 
 It also re-applies the uniform-grade and single-doc guardrails that
-log_features.py already enforces upstream — defence in depth, in case this
+log_judgments_with_features.py already enforces upstream — defence in depth, in case this
 file was produced some other way (e.g. sourced live) and skipped that step.
 
 Usage:
@@ -33,21 +33,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from ltr.judgments import judgments_open
 
+SPLITS = ('train', 'val', 'test')
 
-# ---------------------------------------------------------------------------
-# The split function
-#
-# `assign_split` is a pure function — no I/O, no globals. It is the
-# stable-hash core of the split: the same qid and salt always land in the same
-# bucket, across processes, Python versions and runs.
-# ---------------------------------------------------------------------------
+
 def assign_split(qid, seed_salt, train_pct, val_pct):
-    """Deterministically bucket a qid into 'train' / 'val' / 'test'.
-
-    A stable hash (not random.seed / hash()) so the assignment is identical
-    across processes, Python versions and runs — that stability is the whole
-    point of the split surviving a future re-log of the same queries.
-    """
+    """Bucket a qid via md5, not hash(), so it is stable across processes."""
     bucket = int(hashlib.md5((str(qid) + seed_salt).encode('utf-8')).hexdigest(), 16) % 100
     if bucket < train_pct:
         return 'train'
@@ -60,11 +50,8 @@ def assign_split(qid, seed_salt, train_pct, val_pct):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    # --judgements is accepted as an alias because this repo spells it both ways
-    # (data/judgement_list/ is British, ltr/judgments.py is American), so either
-    # spelling is a reasonable thing to type. args.judgments holds the value.
     parser.add_argument('--judgments', '--judgements', dest='judgments', required=True,
-                        help='logged judgment list, RankLib format (from log_features.py)')
+                        help='logged judgment list, RankLib format (from log_judgments_with_features.py)')
     parser.add_argument('--out-dir', default='data/splits',
                         help='directory to write train.txt / val.txt / test.txt into')
     parser.add_argument('--train-pct', type=int, default=70)
@@ -115,23 +102,12 @@ def main(argv=None):
         print("ERROR every qid was dropped; nothing to split", file=sys.stderr)
         return 1
 
-    split_judgments = {'train': [], 'val': [], 'test': []}
-    split_qids = {'train': [], 'val': [], 'test': []}
+    split_judgments = {name: [] for name in SPLITS}
+    split_qids = {name: [] for name in SPLITS}
     for qid, judgments in kept_by_qid.items():
         split = assign_split(qid, args.seed_salt, args.train_pct, args.val_pct)
         split_judgments[split].extend(judgments)
         split_qids[split].append(qid)
-
-    seen_qids = set()
-    for split, qids in split_qids.items():
-        for qid in qids:
-            if qid in seen_qids:
-                print("ERROR qid %s assigned to more than one split" % qid, file=sys.stderr)
-                return 1
-            seen_qids.add(qid)
-    if seen_qids != set(kept_by_qid.keys()):
-        print("ERROR split qid set does not match kept qid set", file=sys.stderr)
-        return 1
 
     empty_splits = [name for name, qids in split_qids.items() if not qids]
     if empty_splits:
@@ -139,7 +115,7 @@ def main(argv=None):
         return 1
 
     os.makedirs(args.out_dir, exist_ok=True)
-    out_paths = {name: os.path.join(args.out_dir, '%s.txt' % name) for name in ('train', 'val', 'test')}
+    out_paths = {name: os.path.join(args.out_dir, '%s.txt' % name) for name in SPLITS}
     hashes = {}
     for name, path in out_paths.items():
         with judgments_open(path, mode='w') as writer:
@@ -147,9 +123,7 @@ def main(argv=None):
         with open(path, 'rb') as f:
             hashes[name] = hashlib.sha256(f.read()).hexdigest()[:16]
 
-    manifest_dir = os.path.dirname(os.path.abspath(args.manifest_out))
-    if manifest_dir:
-        os.makedirs(manifest_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(args.manifest_out)), exist_ok=True)
     manifest = {
         'train_pct': args.train_pct,
         'val_pct': args.val_pct,
@@ -170,12 +144,11 @@ def main(argv=None):
     with open(args.manifest_out, 'w') as f:
         json.dump(manifest, f, indent=2)
 
-    print("train qids          : %d (%d judgments)" % (len(split_qids['train']), len(split_judgments['train'])), file=sys.stderr)
-    print("val qids            : %d (%d judgments)" % (len(split_qids['val']), len(split_judgments['val'])), file=sys.stderr)
-    print("test qids           : %d (%d judgments)" % (len(split_qids['test']), len(split_judgments['test'])), file=sys.stderr)
-    print("wrote %s" % out_paths['train'], file=sys.stderr)
-    print("wrote %s" % out_paths['val'], file=sys.stderr)
-    print("wrote %s" % out_paths['test'], file=sys.stderr)
+    for name in SPLITS:
+        print("%-20s: %d (%d judgments)" % (name + ' qids', len(split_qids[name]),
+                                             len(split_judgments[name])), file=sys.stderr)
+    for path in out_paths.values():
+        print("wrote %s" % path, file=sys.stderr)
     print("wrote %s" % args.manifest_out, file=sys.stderr)
 
     return 0

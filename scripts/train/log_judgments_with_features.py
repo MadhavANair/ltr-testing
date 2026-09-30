@@ -104,13 +104,9 @@ def log_judgments(rows, report, drop_unlabelled=True):
     return judgments
 
 
-def validate(judgments, features, report):
+def validate(judgments, features):
     errors = []
-    width = len(features)
     for j in judgments:
-        if len(j.features) != width:
-            errors.append("qid %s doc %s: %d features, expected %d"
-                          % (j.qid, j.docId, len(j.features), width))
         for spec, value in zip(features, j.features):
             if value != value:  # NaN
                 errors.append("qid %s doc %s: %s is NaN" % (j.qid, j.docId, spec.name))
@@ -119,7 +115,6 @@ def validate(judgments, features, report):
                               % (j.qid, j.docId, spec.name, value))
         if j.grade < 0:
             errors.append("qid %s doc %s: negative grade %s" % (j.qid, j.docId, j.grade))
-    report['grade_counts'] = Counter(j.grade for j in judgments)
     return errors
 
 
@@ -162,23 +157,20 @@ def main(argv=None):
     # from ltr.features import standardize_features
     # judgments = standardize_features(judgments, FEATURES)
 
-    errors = validate(judgments, FEATURES, report)
+    errors = validate(judgments, FEATURES)
     if errors:
         for err in errors[:20]:
             print("ERROR %s" % err, file=sys.stderr)
         print("%d validation error(s); nothing written." % len(errors), file=sys.stderr)
         return 1
 
-    out_dir = os.path.dirname(os.path.abspath(args.out))
-    if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, 'w') as f:
         judgments_to_file(f, judgments)
 
-    if args.fmap:
-        write_fmap(args.fmap, FEATURES)
+    write_fmap(args.fmap, FEATURES)
 
-    grades = report['grade_counts']
+    grades = Counter(j.grade for j in judgments)
     print("input             : %s" % args.graded_csv, file=sys.stderr)
     print("rows read         : %d" % report['rows_in'], file=sys.stderr)
     print("duplicates dropped: %d" % report['duplicates'], file=sys.stderr)
