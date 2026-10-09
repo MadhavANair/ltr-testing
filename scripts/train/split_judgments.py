@@ -54,9 +54,9 @@ def main(argv=None):
                         help='logged judgment list, RankLib format (from log_judgments_with_features.py)')
     parser.add_argument('--out-dir', default='data/splits',
                         help='directory to write train.txt / val.txt / test.txt into')
-    parser.add_argument('--train-pct', type=int, default=70)
-    parser.add_argument('--val-pct', type=int, default=15)
-    parser.add_argument('--test-pct', type=int, default=15)
+    parser.add_argument('--train-pct', type=int, default=70)  # madeup value
+    parser.add_argument('--val-pct', type=int, default=15)  # madeup value
+    parser.add_argument('--test-pct', type=int, default=15)  # madeup value
     parser.add_argument('--seed-salt', default='',
                         help='mixed into the qid hash; change to force a deliberate full re-split without touching code')
     parser.add_argument('--min-distinct-grades', type=int, default=2,

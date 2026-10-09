@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 """Train LambdaMART. Writes one file: Models/<name>_<timestamp>.txt, the
 RankLib model, which is also a valid OpenSearch `model/ranklib` definition.
-Provenance is printed to stderr, not written to disk.
-
-A validation set is mandatory, and never use -kcv for a model you intend to
-ship: the jar saves no model when cross-validating.
-
+Provenance is printed to stderr
 Usage:
     python3 scripts/train/train_lambdamart.py \\
         --train data/splits/train.txt --val data/splits/val.txt \\
@@ -13,8 +9,8 @@ Usage:
 """
 
 import argparse
+import hashlib
 import os
-import subprocess
 import sys
 from datetime import datetime, timezone
 
@@ -23,18 +19,12 @@ sys.path.insert(0, REPO_ROOT)
 
 from ltr.judgments import judgments_open
 from ltr.ranklib import trainModel
-from ltr.features import FEATURES, feature_list_hash
+from ltr.features import FEATURES
 
 
-def git_sha(repo_root):
-    try:
-        result = subprocess.run(['git', 'rev-parse', 'HEAD'],
-                                capture_output=True, text=True, cwd=repo_root)
-        if result.returncode != 0:
-            return None
-        return result.stdout.strip()
-    except Exception:
-        return None
+def model_sha(model_path):
+    with open(model_path, 'rb') as f:
+        return hashlib.sha256(f.read()).hexdigest()
 
 
 def verify_feature_widths(judgments, features, source_label):
@@ -47,27 +37,6 @@ def verify_feature_widths(judgments, features, source_label):
     return errors
 
 
-def build_impacts_by_name(log, features):
-    # RankLib keys impacts by 1-based index as a string; this repo's fmap is
-    # 0-based, so without the offset the report blames the neighbouring feature.
-    by_name = {}
-    for key, impact in log.impacts.items():
-        idx = int(key) - 1
-        if idx < 0 or idx >= len(features):
-            raise ValueError("feature impact key %r out of range for %d features"
-                              % (key, len(features)))
-        by_name[features[idx].name] = impact
-    return dict(sorted(by_name.items(), key=lambda kv: kv[1], reverse=True))
-
-
-def count_trees(model_path):
-    try:
-        with open(model_path) as f:
-            return f.read().count('<tree id=')
-    except OSError:
-        return None
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -77,15 +46,15 @@ def main(argv=None):
                              'one trains until the model has memorised the training data)')
     parser.add_argument('--out-dir', default='Models')
     parser.add_argument('--name', default='lambdamart', help='filename prefix')
-    parser.add_argument('--trees', type=int, default=500,
+    parser.add_argument('--trees', type=int, default=500,  # madeup value
                         help='upper bound on boosting rounds; with --estop the jar saves the '
                              'best validation iteration, usually far fewer (default: %(default)s)')
-    parser.add_argument('--leaf', type=int, default=10)
-    parser.add_argument('--shrinkage', type=float, default=0.05)
-    parser.add_argument('--mls', type=int, default=5)
-    parser.add_argument('--metric', default='NDCG@10')
+    parser.add_argument('--leaf', type=int, default=10)  # madeup value
+    parser.add_argument('--shrinkage', type=float, default=0.05)  # madeup value
+    parser.add_argument('--mls', type=int, default=5)  # madeup value
+    parser.add_argument('--metric', default='NDCG@10')  # madeup value
     parser.add_argument('--tc', type=int, help='threshold candidates for tree splitting')
-    parser.add_argument('--estop', type=int, default=100,
+    parser.add_argument('--estop', type=int, default=100,  # madeup value
                         help='stop after this many rounds with no validation improvement '
                              '(default: %(default)s); 0 disables')
     args = parser.parse_args(argv)
@@ -123,6 +92,7 @@ def main(argv=None):
     model_path = os.path.join(args.out_dir, '%s_%s.txt' % (args.name, timestamp))
 
     estop = args.estop or None
+    # actual training: runs the RankLib LambdaMART jar and writes the model file
     result = trainModel(training_set=train_judgments, validation_set=val_judgments,
                         out=model_path, ranker=6, trees=args.trees, leafs=args.leaf,
                         shrinkage=args.shrinkage, mls=args.mls, tc=args.tc, estop=estop,
@@ -132,33 +102,17 @@ def main(argv=None):
         print("ERROR ranklib produced no training log; check the jar output above",
               file=sys.stderr)
         return 1
-    log = result.trainingLogs[-1]
 
     if not os.path.exists(model_path):
         print("ERROR ranklib did not write a model file at %s" % model_path,
               file=sys.stderr)
         return 1
 
-    impacts_by_name = build_impacts_by_name(log, FEATURES)
+    print("model            : %s" % model_path, file=sys.stderr)
 
-    print("\n=== provenance ===", file=sys.stderr)
-    print("trained at       : %s" % datetime.now(timezone.utc).isoformat(), file=sys.stderr)
-    print("git sha          : %s" % git_sha(REPO_ROOT), file=sys.stderr)
-    print("train judgments  : %d (%s)" % (len(train_judgments), args.train), file=sys.stderr)
-    print("val judgments    : %d (%s)" % (len(val_judgments), args.val), file=sys.stderr)
-    print("features         : %d (hash %s)" % (len(FEATURES), feature_list_hash(FEATURES)),
-          file=sys.stderr)
-    print("hyperparameters  : trees=%s leaf=%s shrinkage=%s mls=%s tc=%s estop=%s metric=%s ranker=6"
-          % (args.trees, args.leaf, args.shrinkage, args.mls, args.tc, estop, args.metric),
-          file=sys.stderr)
-    print("trees saved      : %s (of --trees %d; -validate keeps the best iteration)"
-          % (count_trees(model_path), args.trees), file=sys.stderr)
-    print("training metric  : %s = %s  <- on data the model has seen; not a quality signal"
-          % (log.trainMetricName, log.metric()), file=sys.stderr)
-    print("validation metric: %s = %s  <- the honest score"
-          % (log.validationMetricName, log.validation_metric()), file=sys.stderr)
-    print("feature impacts  : %s" % impacts_by_name, file=sys.stderr)
-    print("\nmodel            : %s" % model_path, file=sys.stderr)
+    # --- model sha: identity of this model; upload-model uses it to skip duplicates ---
+    print("model sha256     : %s" % model_sha(model_path), file=sys.stderr)
+    # ---------------------------------------------------------------------------------
 
     return 0
 

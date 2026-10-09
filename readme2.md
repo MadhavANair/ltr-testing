@@ -1,6 +1,6 @@
 # Train
 
-Run everything from `training-ltr/`.
+Run everything from `opensearch-ltr/`.
 
 ## Setup (once per machine)
 
@@ -16,13 +16,14 @@ java -version
 |---|---|---|
 | `scripts/train.sh` | log → split → train, stops at the model | `Models/lambdamart_<ts>.txt` |
 | `scripts/val.sh` | hyperparameter search, then retrains the winner and reports absolute NDCG@k on `val.txt` | `Models/tuning/tuning_report.json` |
-| `scripts/train/log_judgments_with_features.py` | graded CSV drop → RankLib vectors | `data/logged_with_features.txt`, `data/fmap.txt` |
+| `scripts/train/log_judgments_with_features.py` | graded CSV drop → RankLib vectors | `data/logged_with_features.txt` |
 | `scripts/train/split_judgments.py` | splits by query (stable qid hash) | `data/splits/{train,val,test}.txt`, `manifest.json` |
 | `scripts/train/train_lambdamart.py` | trains LambdaMART via the RankLib jar | `Models/lambdamart_<ts>.txt` |
 | `scripts/val/tune.py` | Bayesian search over shrinkage/leaf/mls/estop, then one retrain of the winner for an absolute NDCG check | `Models/tuning/tuning_report.json` |
 | `scripts/test/evaluate.py` | manual, standalone: actual-vs-predicted NDCG@k on any model + any split. Nothing calls this automatically | stderr; optional CSV via `--out` |
 | `scripts/export_model/export_model.py` | builds the `_createmodel` request body | `export/<model>_model_body.json` |
-| `./scripts/upload-model` | uploads the latest model to local OpenSearch and checks it loads and scores (run after `local-dev/scripts/create-index`) | model in `.ltrstore` |
+| `./scripts/upload-model` | uploads the featureset and latest model to the local bot OpenSearch (run after `local-dev/scripts/create-index`) | model in `.ltrstore` |
+| `./scripts/delete-model` | deletes a model (latest by default, or a path/name) from the local bot OpenSearch; leaves the featureset | — |
 
 Everything runs offline against the data drop — no live search API involved.
 
@@ -40,7 +41,7 @@ Or step by step:
 ```bash
 python3 scripts/train/log_judgments_with_features.py \
     --graded-csv data/raw/mock-judgments-601-final.csv \
-    --out data/logged_with_features.txt --fmap data/fmap.txt
+    --out data/logged_with_features.txt
 
 python3 scripts/train/split_judgments.py \
     --judgments data/logged_with_features.txt \

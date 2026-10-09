@@ -13,7 +13,7 @@ The feature contract (names, order, normalisation) lives in ltr/features.py.
 Usage:
     python scripts/train/log_judgments_with_features.py \\
         --graded-csv data/raw/mock-judgments-601-final.csv \\
-        --out data/logged_with_features.txt --fmap data/fmap.txt
+        --out data/logged_with_features.txt
 """
 
 import argparse
@@ -25,7 +25,7 @@ from collections import Counter, OrderedDict
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from ltr.judgments import Judgment, judgments_to_file
-from ltr.features import FEATURES, format_value, write_fmap
+from ltr.features import FEATURES, format_value
 
 FEATURE_SOURCE_COLUMNS = [spec.source for spec in FEATURES]
 
@@ -121,13 +121,11 @@ def validate(judgments, features):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--graded-csv', default='data/raw/mock-judgments-601-final.csv',
+    parser.add_argument('--graded-csv', default='data/raw/mock-judgments-601-final.csv',  # madeup value
                         help='the combined grade+feature CSV drop (default: %(default)s)')
     parser.add_argument('--out', default='data/logged_with_features.txt',
                         help='RankLib output path — grades + feature vectors, '
                         'i.e. the logged judgment list (default: %(default)s)')
-    parser.add_argument('--fmap', default='data/fmap.txt',
-                        help='feature index -> name map (default: %(default)s)')
     parser.add_argument('--keep-flat-queries', action='store_true',
                         help='keep queries whose docs all share one grade')
     args = parser.parse_args(argv)
@@ -167,8 +165,6 @@ def main(argv=None):
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, 'w') as f:
         judgments_to_file(f, judgments)
-
-    write_fmap(args.fmap, FEATURES)
 
     grades = Counter(j.grade for j in judgments)
     print("input             : %s" % args.graded_csv, file=sys.stderr)

@@ -12,8 +12,8 @@ import hashlib
 class FeatureSpec:
     """One logged feature: where it comes from and how it is normalised."""
 
-    def __init__(self, name, source, transform=None, missing=0.0, kind='float'):
-        self.name = name            # canonical name: fmap entry, sltr feature name
+    def __init__(self, name, source, transform=None, missing=0.0, kind='float'):  # madeup value
+        self.name = name            # canonical name: sltr feature name
         self.source = source        # CSV column / raw field carrying the value
         self.transform = transform  # raw value -> logged value
         self.missing = missing      # substituted when nothing was logged
@@ -60,7 +60,7 @@ def format_value(spec, value):
     """Binary features stay integral, scores keep 4dp."""
     if spec.kind == 'binary':
         return int(round(value))
-    return round(value, 4)
+    return round(value, 4)  # madeup value
 
 
 def standardize_features(judgments, features=FEATURES):
@@ -91,14 +91,3 @@ def standardize_features(judgments, features=FEATURES):
         for j in judgments:
             j.features[idx] = (j.features[idx] - mean) / std
     return judgments
-
-
-def write_fmap(path, features=FEATURES):
-    """Feature index -> name map. 0-based, matching this repo's existing
-    fmap files — NOTE RankLib's own feature numbering in its training
-    output and model files is 1-based, so a feature-impact report read
-    through this fmap must add 1 before looking a name up, or it blames
-    the wrong feature."""
-    with open(path, 'w') as f:
-        for idx, spec in enumerate(features):
-            f.write("%d %s q\n" % (idx, spec.name))

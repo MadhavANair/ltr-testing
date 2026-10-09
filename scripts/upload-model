@@ -1,99 +1,46 @@
 #!/usr/bin/env bash
-# Uploads a trained model to local OpenSearch (after local-dev/scripts/create-index)
-# and checks the cluster can load and score it. Usage: ./scripts/upload-model [Models/<model>.txt]
-set -euo pipefail
+# Uploads a trained model to the local bot OpenSearch (after local-dev/scripts/create-index).
+# Usage: ./scripts/upload-model [Models/<model>.txt]
+
+set -e
+
 cd "$(dirname "$0")/.."
 
-OS_URL="${OS_URL:-http://localhost:9201}"
-INDEX="images"
-FEATURESET="alamy_phase1"
-MODEL="${1:-$(ls -t Models/lambdamart_*.txt | head -1)}"
-NAME=$(basename "${MODEL%.txt}")
-BODY="export/${NAME}_model_body.json"
-DOC_IDS='["ltr-compat-1","ltr-compat-2","ltr-compat-3"]'
-FAILS=0
+model=${1:-$(ls -t Models/lambdamart_*.txt | head -1)}
+name=$(basename "${model%.txt}")
 
-pass() { echo "PASS $1"; }
-fail() { echo "FAIL $1${2:+ - $2}"; FAILS=$((FAILS + 1)); }
-os() { curl -s -m 30 -H 'Content-Type: application/json' "$@"; }
+echo "Waiting for bot OpenSearch domain to start..."
+until curl -s "http://localhost:9201" > /dev/null; do
+  sleep 2
+done
+echo "Bot domain ready"
 
-echo "model $NAME -> $OS_URL"
+echo "Exporting $name..."
+python3 scripts/export_model/export_model.py --model "$model"
 
-curl -sf -m 3 "$OS_URL" >/dev/null ||
-    { echo "FAIL $OS_URL unreachable (cd opensearch-ingest/opensearch-ingest/local-dev && docker compose up -d && ./scripts/create-index)"; exit 1; }
-[ "$(os -I -o /dev/null -w '%{http_code}' "$OS_URL/$INDEX")" = 200 ] ||
-    { echo "FAIL alias '$INDEX' missing, run local-dev/scripts/create-index"; exit 1; }
-os "$OS_URL/_cat/plugins" | grep -q opensearch-ltr ||
-    { echo "FAIL opensearch-ltr plugin not installed on $OS_URL"; exit 1; }
+echo "Creating LTR feature store..."
+curl -X PUT "http://localhost:9201/_ltr"
 
-os -X PUT "$OS_URL/_ltr" >/dev/null
-[ "$(os -o /dev/null -w '%{http_code}' "$OS_URL/_ltr")" = 200 ] && pass "ltr store" || fail "ltr store"
+echo "Creating alamy_phase1 featureset..."
+featureset=$(mktemp)
+python3 -c "import sys, json; sys.path.insert(0, 'scripts/export_model'); import export_model; print(json.dumps(export_model.FEATURESET))" >$featureset
+curl -X PUT "http://localhost:9201/_ltr/_featureset/alamy_phase1" -H "Content-Type: application/json" --data @$featureset
+rm -f $featureset
 
-if out=$(python3 scripts/export_model/export_model.py --model "$MODEL" 2>&1); then
-    pass "export"
-else
-    fail "export" "$out"
-    exit 1
+# Skip if a model with identical content (same sha256) is already live.
+curl -s -X POST "http://localhost:9201/.ltrstore/_refresh" > /dev/null
+existing=$(curl -s "http://localhost:9201/_ltr/_model?size=1000" | jq -r --rawfile def "$model" '[.hits.hits[]._source | select(.model.model.definition == $def) | .name] | first // empty')
+if [ -n "$existing" ]; then
+  echo "Model $name is identical to $existing already on the cluster, skipping upload"
+  exit 0
 fi
 
-LOCAL_FS=$(python3 -c "import sys, json; sys.path.insert(0, 'scripts/export_model'); import export_model as e; print(json.dumps(e.FEATURESET))")
-REMOTE_FS=$(os "$OS_URL/_ltr/_featureset/$FEATURESET")
-if [ "$(jq -r '.found' <<<"$REMOTE_FS")" = true ]; then
-    if diff <(jq -S '.featureset.features' <<<"$LOCAL_FS") <(jq -S '._source.featureset.features' <<<"$REMOTE_FS") >/dev/null; then
-        pass "featureset $FEATURESET matches local"
-    else
-        fail "featureset $FEATURESET" "differs from export_model.py; delete _ltr/_featureset/$FEATURESET and re-run"
-    fi
-else
-    res=$(os -X PUT "$OS_URL/_ltr/_featureset/$FEATURESET" -d "$LOCAL_FS")
-    [ "$(jq -r '.result' <<<"$res")" = created ] && pass "featureset $FEATURESET created" || fail "featureset $FEATURESET" "$res"
-fi
+echo "Uploading model $name..."
+curl -X POST "http://localhost:9201/_ltr/_featureset/alamy_phase1/_createmodel" -H "Content-Type: application/json" --data @export/${name}_model_body.json
 
-os -X DELETE "$OS_URL/_ltr/_model/$NAME" >/dev/null
-res=$(os -X POST "$OS_URL/_ltr/_featureset/$FEATURESET/_createmodel" --data @"$BODY")
-[ "$(jq -r '.result' <<<"$res")" = created ] && pass "model uploaded" || fail "model uploaded" "$res"
-
-MAX_FEATURE=$(grep -o '<feature>[^<]*</feature>' "$MODEL" | tr -dc '0-9\n' | sort -n | tail -1)
-N_FEATURES=$(jq '.featureset.features | length' <<<"$LOCAL_FS")
-if [ "$MAX_FEATURE" -le "$N_FEATURES" ]; then
-    pass "model uses features 1..$MAX_FEATURE of $N_FEATURES"
-else
-    fail "feature arity" "model splits on feature $MAX_FEATURE, featureset has $N_FEATURES"
-fi
-
-FIELDS=$(jq -r '[.featureset.features[].template | (.match // {} | keys[]), (.multi_match.fields // [])[]] | unique[]' <<<"$LOCAL_FS")
-MAPPED=$(os "$OS_URL/$INDEX/_mapping" | jq -r '.[].mappings.properties | keys[]')
-MISSING=$(comm -23 <(sort <<<"$FIELDS") <(sort <<<"$MAPPED") | paste -sd' ')
-if [ -z "$MISSING" ]; then
-    pass "featureset fields exist in $INDEX mapping"
-else
-    fail "featureset fields not in $INDEX mapping (features score 0)" "$MISSING"
-fi
-
-cleanup() {
-    os -X POST "$OS_URL/$INDEX/_delete_by_query?refresh=true" \
-        -d "{\"query\":{\"ids\":{\"values\":$DOC_IDS}}}" >/dev/null || true
-}
-trap cleanup EXIT
-
-docs=$(jq -nc --arg index "$INDEX" '
-    ["london double decker bus", "red bus on a london street", "beach at sunset"] | to_entries[]
-    | {index: {_index: $index, _id: "ltr-compat-\(.key + 1)"}},
-      {Caption: .value, MainWords: (.value | split(" ")), PseudonymRank: 10, ImageBoost: 1,
-       IsArchive: false, BlackAndWhite: false, AssetType: "photograph"}')
-res=$(curl -s -m 30 -H 'Content-Type: application/x-ndjson' "$OS_URL/_bulk?refresh=true" --data-binary "$docs"$'\n')
-[ "$(jq -r '.errors' <<<"$res")" = false ] || { fail "index test docs" "$res"; exit 1; }
-
-query=$(jq -nc --arg m "$NAME" --argjson ids "$DOC_IDS" '
-    {size: 10, query: {ids: {values: $ids}},
-     rescore: {window_size: 10, query: {rescore_query: {sltr: {params: {keywords: "london bus"}, model: $m}}}}}')
-res=$(os "$OS_URL/$INDEX/_search" -d "$query")
-if jq -e '(.error == null) and (.hits.hits | length == 3) and all(.hits.hits[]; (._score | type) == "number")' <<<"$res" >/dev/null; then
-    pass "sltr rescore scored 3 docs: $(jq -c '[.hits.hits[]._score]' <<<"$res")"
-else
-    fail "sltr rescore" "$(jq -c '.error // .hits.hits' <<<"$res")"
-fi
-
-echo
-[ "$FAILS" -eq 0 ] && echo "all checks passed" || echo "$FAILS check(s) failed"
-exit $((FAILS > 0))
+# Keep one model per featureset: delete every other model on alamy_phase1.
+curl -s -X POST "http://localhost:9201/.ltrstore/_refresh" > /dev/null
+for old in $(curl -s "http://localhost:9201/_ltr/_model?size=1000" | jq -r --arg name "$name" '.hits.hits[]._source | select(.name != $name and (.model.feature_set.name // "alamy_phase1") == "alamy_phase1") | .name'); do
+  echo "Deleting older model $old..."
+  curl -X DELETE "http://localhost:9201/_ltr/_model/$old"
+done

@@ -64,7 +64,7 @@ input.
 **Setup (once per machine):**
 
 ```bash
-cd /home/madhav/Projects/training-ltr
+cd /home/madhav/Projects/Learntorank/opensearch-ltr
 source venv/bin/activate          # or: python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 java -version                     # Java is required — the trainer shells out to a jar
@@ -77,9 +77,9 @@ grades plus the 13 feature columns, no intermediate file):
 ```bash
 python3 scripts/train/log_judgments_with_features.py \
     --graded-csv data/raw/mock-judgments-601-final.csv \
-    --out data/logged_with_features.txt --fmap data/fmap.txt
+    --out data/logged_with_features.txt
 ```
-→ `data/logged_with_features.txt` (RankLib format), `data/fmap.txt`
+→ `data/logged_with_features.txt` (RankLib format)
 Expect: `queries logged : 100`, `judgments written : 601 (13 features each)`.
 
 **Step 2 — split by query:**
@@ -100,15 +100,10 @@ python3 scripts/train/train_lambdamart.py \
     --trees 500 --leaf 10 --shrinkage 0.05 --mls 5 --estop 100
 ```
 → `Models/lambdamart_<timestamp>.txt` and nothing else. This stage writes
-exactly one file, the RankLib model. Provenance (git SHA, hyperparameters,
-feature-list hash, metrics, feature impacts) is printed to stderr instead of
-written to a sidecar, so capture the output if you need to attribute the model
-later.
-Expect: both a `training metric` and a `validation metric` line, plus a
-per-feature impact breakdown. Read the validation one — the training figure hits
-1.0 within a few rounds on this data and means nothing. Also expect `trees
-saved` to be far below `--trees`: with `-validate` the jar keeps the best
-iteration, so a 500-cap run legitimately saves ~64 trees.
+exactly one file, the RankLib model. The model path and its sha256 are printed
+to stderr. RankLib's own NDCG lines appear in the jar output while it runs; read
+the validation one, the training figure hits 1.0 within a few rounds and means
+nothing.
 
 **Step 4 — build the upload JSON.** Needs the timestamp from step 3 — find it
 with `ls Models/`, or capture it:
@@ -168,7 +163,7 @@ reproducible.
 ## Repo layout
 
 ```
-training-ltr/
+opensearch-ltr/
 ├── Models/                       # top-level, separate from data/ — nothing here is training data
 │   ├── lambdamart_<ts>.txt       # the ONLY thing training writes
 │   └── tuning/                   # tune.py's report (fold models are temp-dir'd and deleted)
@@ -176,7 +171,6 @@ training-ltr/
 │   ├── raw/                      # data drops as received (grade + features + caption)
 │   │   └── mock-judgments-601-final.csv
 │   ├── logged_with_features.txt  # step 1 output, RankLib format
-│   ├── fmap.txt
 │   └── splits/                   # step 2 output
 │       ├── train.txt
 │       ├── val.txt
