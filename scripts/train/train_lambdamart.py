@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Train LambdaMART. Writes one file: Models/<name>_<timestamp>.txt, the
 RankLib model, which is also a valid OpenSearch `model/ranklib` definition.
-Provenance is printed to stderr
+The model path and its sha256 are printed to stderr.
+
 Usage:
     python3 scripts/train/train_lambdamart.py \\
         --train data/splits/train.txt --val data/splits/val.txt \\

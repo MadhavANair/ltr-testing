@@ -10,22 +10,42 @@ model=${1:-$(ls -t Models/lambdamart_*.txt | head -1)}
 name=$(basename "${model%.txt}")
 
 echo "Waiting for bot OpenSearch domain to start..."
-until curl -s "http://localhost:9201" > /dev/null; do
+for _ in $(seq 30); do
+  curl -s "http://localhost:9201" > /dev/null && break
   sleep 2
 done
+curl -s "http://localhost:9201" > /dev/null || {
+  echo "Bot domain not reachable on :9201 after 60s. Start it with:"
+  echo "  cd opensearch-ingest/opensearch-ingest/local-dev && docker compose up -d && ./scripts/create-index"
+  exit 1
+}
 echo "Bot domain ready"
 
 echo "Exporting $name..."
 python3 scripts/export_model/export_model.py --model "$model"
 
 echo "Creating LTR feature store..."
-curl -X PUT "http://localhost:9201/_ltr"
+# PUT errors if the store already exists, so check it with a GET afterwards instead.
+curl -s -o /dev/null -X PUT "http://localhost:9201/_ltr"
+curl -s --fail "http://localhost:9201/_ltr" > /dev/null
 
-echo "Creating alamy_phase1 featureset..."
 featureset=$(mktemp)
+trap 'rm -f $featureset' EXIT
 python3 -c "import sys, json; sys.path.insert(0, 'scripts/export_model'); import export_model; print(json.dumps(export_model.FEATURESET))" >$featureset
-curl -X PUT "http://localhost:9201/_ltr/_featureset/alamy_phase1" -H "Content-Type: application/json" --data @$featureset
-rm -f $featureset
+remote=$(curl -s "http://localhost:9201/_ltr/_featureset/alamy_phase1")
+if [ "$(jq -r '.found' <<<"$remote")" = true ]; then
+  # Features are addressed by position, so a mismatched featureset scores garbage silently.
+  if ! diff <(jq -S '.featureset.features' $featureset) <(jq -S '._source.featureset.features' <<<"$remote") > /dev/null; then
+    echo "Featureset alamy_phase1 on the cluster differs from export_model.py."
+    echo "Delete it (curl -X DELETE http://localhost:9201/_ltr/_featureset/alamy_phase1) and re-run."
+    exit 1
+  fi
+  echo "Featureset alamy_phase1 already present and matches"
+else
+  echo "Creating alamy_phase1 featureset..."
+  curl --fail-with-body -X PUT "http://localhost:9201/_ltr/_featureset/alamy_phase1" -H "Content-Type: application/json" --data @$featureset
+  echo
+fi
 
 # Skip if a model with identical content (same sha256) is already live.
 curl -s -X POST "http://localhost:9201/.ltrstore/_refresh" > /dev/null
@@ -36,7 +56,9 @@ if [ -n "$existing" ]; then
 fi
 
 echo "Uploading model $name..."
-curl -X POST "http://localhost:9201/_ltr/_featureset/alamy_phase1/_createmodel" -H "Content-Type: application/json" --data @export/${name}_model_body.json
+# --fail-with-body: if the upload is rejected, stop here before the cleanup below deletes the old models.
+curl --fail-with-body -X POST "http://localhost:9201/_ltr/_featureset/alamy_phase1/_createmodel" -H "Content-Type: application/json" --data @export/${name}_model_body.json
+echo
 
 # Keep one model per featureset: delete every other model on alamy_phase1.
 curl -s -X POST "http://localhost:9201/.ltrstore/_refresh" > /dev/null
