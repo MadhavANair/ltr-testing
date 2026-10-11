@@ -15,13 +15,12 @@ dist/
 .eggs/
 
 # Data files (large local data drop — not pushed)
-data/
+judgements/data/
 
-# Trained models
-Models/
-
-# Generated upload payloads
-export/
+# Trained models and tuning output
+train/trained_models/
+tune/tuning_report.json
+deploy/models/
 
 # Reference notebooks (exploratory, not part of the pipeline)
 references folder/

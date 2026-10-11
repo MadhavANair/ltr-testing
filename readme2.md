@@ -14,45 +14,45 @@ java -version
 
 | Script | Does | Writes |
 |---|---|---|
-| `scripts/train.sh` | log → split → train, stops at the model | `Models/lambdamart_<ts>.txt` |
-| `scripts/val.sh` | hyperparameter search, then retrains the winner and reports absolute NDCG@k on `val.txt` | `Models/tuning/tuning_report.json` |
-| `scripts/train/log_judgments_with_features.py` | graded CSV drop → RankLib vectors | `data/logged_with_features.txt` |
-| `scripts/train/split_judgments.py` | splits by query (stable qid hash) | `data/splits/{train,val,test}.txt`, `manifest.json` |
-| `scripts/train/train_lambdamart.py` | trains LambdaMART via the RankLib jar | `Models/lambdamart_<ts>.txt` |
-| `scripts/val/tune.py` | Bayesian search over shrinkage/leaf/mls/estop, then one retrain of the winner for an absolute NDCG check | `Models/tuning/tuning_report.json` |
-| `scripts/test/evaluate.py` | manual, standalone: actual-vs-predicted NDCG@k on any model + any split. Nothing calls this automatically | stderr; optional CSV via `--out` |
-| `scripts/export_model/export_model.py` | builds the `_createmodel` request body | `export/<model>_model_body.json` |
-| `./scripts/upload-model` | uploads the featureset and latest model to the local bot OpenSearch (run after `local-dev/scripts/create-index`) | model in `.ltrstore` |
-| `./scripts/delete-model` | deletes a model (latest by default, or a path/name) from the local bot OpenSearch; leaves the featureset | — |
+| `judgements/judgements.sh` | logs `raw/train`, `raw/val`, `raw/test` CSVs (no split step) | `judgements/data/graded/{train,val,test}/` |
+| `train/train.sh` | trains one model from graded train + val | `train/trained_models/lambdamart_<ts>.txt` |
+| `test/test.sh` | NDCG@10 >= 0.7 on every `graded/test/*.txt`; moves passing models to `deploy/models/` | `deploy/models/` |
+| `tune/tune.sh` | hyperparameter search, then retrains the winner and reports absolute NDCG@k on `val.txt` | `tune/tuning_report.json` |
+| `judgements/log.py` | one or more graded CSVs → one RankLib file; checks QID uniqueness and `--disjoint-from` overlap | `--out` path |
+| `train/train_lambdamart.py` | trains LambdaMART via the RankLib jar | `train/trained_models/lambdamart_<ts>.txt` |
+| `tune/tune.py` | Bayesian search over shrinkage/leaf/mls/estop, then one retrain of the winner for an absolute NDCG check | `tune/tuning_report.json` |
+| `test/evaluate.py` | actual-vs-predicted NDCG@k on any model + any test file; exit 2 below `--min-ndcg`. Called by `test/test.sh` | stderr; optional CSV via `--out` |
+| `deploy/featureset.json` | the `alamy_phase1` feature definitions, in `ltr/features.py` order | — |
+| `./deploy/upload-model` | uploads the featureset and newest `deploy/models/` model to the local bot OpenSearch; skips if `alamy_phase1` already has a model (run after `local-dev/scripts/create-index`) | model in `.ltrstore` |
+| `./deploy/delete-model` | deletes a model (latest by default, or a path/name) from the local bot OpenSearch; leaves the featureset | — |
 
 Everything runs offline against the data drop — no live search API involved.
 
 ## Produce the model
 
 ```bash
-./scripts/train.sh
+./train/train.sh
 ```
 
-Runs the three steps below and stops at the model. Input file and
-hyperparameters are variables at the top of the script.
+Needs `./judgements/judgements.sh` first, which logs the content team's
+`raw/train/`, `raw/val/` and `raw/test/` CSVs. Hyperparameters are variables
+at the top of `train.sh`.
 
-Or step by step:
+Or by hand:
 
 ```bash
-python3 scripts/train/log_judgments_with_features.py \
-    --graded-csv data/raw/mock-judgments-601-final.csv \
-    --out data/logged_with_features.txt
+python3 judgements/log.py --graded-csv judgements/data/raw/train/*.csv \
+    --out judgements/data/graded/train/train.txt
+python3 judgements/log.py --graded-csv judgements/data/raw/val/*.csv \
+    --disjoint-from judgements/data/raw/train/*.csv \
+    --out judgements/data/graded/val/val.txt
 
-python3 scripts/train/split_judgments.py \
-    --judgments data/logged_with_features.txt \
-    --out-dir data/splits --manifest-out data/splits/manifest.json
-
-python3 scripts/train/train_lambdamart.py \
-    --train data/splits/train.txt --val data/splits/val.txt \
+python3 train/train_lambdamart.py \
+    --train judgements/data/graded/train/train.txt --val judgements/data/graded/val/val.txt \
     --trees 500 --leaf 10 --shrinkage 0.05 --mls 5 --estop 100
 ```
 
-Writes one file: `Models/lambdamart_<timestamp>.txt`. `--trees` is a cap, not a
+Writes one file: `train/trained_models/lambdamart_<timestamp>.txt`. `--trees` is a cap, not a
 count — with `--estop` the jar keeps the best validation iteration, so a 500-cap
 run typically saves ~64 trees. Read the `validation metric` line it prints, not
 `training metric`, which hits 1.0 within a few rounds on this data.
@@ -60,73 +60,51 @@ run typically saves ~64 trees. Read the `validation metric` line it prints, not
 ## Tune the hyperparameters (this is also the NDCG check)
 
 ```bash
-./scripts/val.sh
+./tune/tune.sh
 ```
 
 Bayesian search over shrinkage/leaf/mls/estop, scored by k-fold CV on the
 pooled train+val queries — that CV score is for comparing configurations
 against each other, not a score against `val.txt` itself. Once a winner is
 picked, `tune.py` retrains it *once* more on the plain, unpooled train/val
-split and prints RankLib's own **absolute** NDCG@k for that exact config —
+sets and prints RankLib's own **absolute** NDCG@k for that exact config —
 the same number `train_lambdamart.py` would print, written to the report
-JSON as `final_val_ndcg`. It still writes no shippable model — it prints a
-`train_lambdamart.py` command to paste into `train.sh`. Costs
+JSON as `final_val_ndcg`. `tune.sh` then runs `train/train.sh` with the
+winning parameters, which writes the model to `train/trained_models/`. Costs
 `N_TRIALS x FOLDS` training runs plus one more for the final check (151 by
-default) — for a quick look: `N_TRIALS=5 FOLDS=3 ./scripts/val.sh`.
+default) — for a quick look: `N_TRIALS=5 FOLDS=3 ./tune/tune.sh`.
 
 There's no baseline comparison anywhere in this — it's a quality sanity
 check (does the model rank held-out graded documents sensibly), not a
 launch decision.
 
-## Ad hoc: check a specific model against a specific split
+## Ad hoc: check a specific model against a specific test set
 
 ```bash
-python3 scripts/test/evaluate.py --model Models/lambdamart_X.txt --test data/splits/val.txt
+python3 test/evaluate.py --model train/trained_models/lambdamart_X.txt --test judgements/data/graded/test/<name>.txt
 ```
 
-Manual, standalone — nothing in the pipeline calls `evaluate.py`
-automatically (`val.sh` above is what reports NDCG as part of the normal
-flow). Scores the model, then prints per-query and mean NDCG@k to stderr —
+`test/test.sh` calls this for every model in `train/trained_models/` against
+every `graded/test/*.txt` with `--min-ndcg 0.7`; by hand it works against any file. Scores the model, then prints per-query and mean NDCG@k to stderr —
 actual (graded) value vs predicted (model score) value, freely re-runnable
-against any RankLib-format split. Pass `--out <path.csv>` for a per-row
+against any RankLib-format file. Pass `--out <path.csv>` for a per-row
 `qid, doc_id, rank, actual_grade, predicted_score` table.
 
 ## Upload the model to OpenSearch
 
 ```bash
-MODEL=$(ls -t Models/lambdamart_*.txt | head -1)
-python3 scripts/export_model/export_model.py --model "$MODEL"
+./deploy/upload-model                      # newest deploy/models/ model
+./deploy/upload-model deploy/models/X.txt  # or a specific one
 ```
 
-Writes `export/<model>_model_body.json` — the `_createmodel` request body and
-nothing else, so it POSTs as-is with no `jq` step:
+Checks `deploy/featureset.json` order against `ltr/features.py` (RankLib scores
+by position), PUTs the `alamy_phase1` featureset from that file if missing,
+then wraps the model `.txt` with `jq --rawfile` and POSTs it to `_createmodel`.
+Nothing is written to disk. If `alamy_phase1` already has a model it skips;
+`_createmodel` will not overwrite, so delete first:
 
 ```bash
-curl -X POST "http://localhost:9201/_ltr/_featureset/alamy_phase1/_createmodel" \
-    -H 'Content-Type: application/json' \
-    --data @export/$(basename "${MODEL%.txt}")_model_body.json
-```
-
-If that reports the model already exists, delete it first — `_createmodel` will
-not overwrite:
-
-```bash
-curl -X DELETE "http://localhost:9201/_ltr/_model/$(basename "${MODEL%.txt}")"
-```
-
-The `alamy_phase1` featureset is hardcoded in the script but is **not** emitted
-— it is only the reference the model's feature order is checked against, since
-RankLib scores by position. It only needs uploading once per cluster, and
-already exists on the local bot node. To re-create it elsewhere, dump it from
-the script and PUT that:
-
-```bash
-python3 -c "import sys, json; sys.path.insert(0, 'scripts/export_model'); \
-import export_model as e; print(json.dumps(e.FEATURESET, indent=2))" \
-> export/featureset.json
-
-curl -X PUT "http://localhost:9201/_ltr/_featureset/alamy_phase1" \
-    -H 'Content-Type: application/json' --data @export/featureset.json
+./deploy/delete-model <model name>
 ```
 
 Then query it:

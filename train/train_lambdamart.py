@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Train LambdaMART. Writes one file: Models/<name>_<timestamp>.txt, the
+"""Train LambdaMART. Writes one file: train/trained_models/<name>_<timestamp>.txt, the
 RankLib model, which is also a valid OpenSearch `model/ranklib` definition.
 The model path and its sha256 are printed to stderr.
 
 Usage:
-    python3 scripts/train/train_lambdamart.py \\
-        --train data/splits/train.txt --val data/splits/val.txt \\
+    python3 train/train_lambdamart.py \\
+        --train judgements/data/graded/train/train.txt --val judgements/data/graded/val/val.txt \\
         --trees 500 --leaf 10 --shrinkage 0.05 --mls 5 --estop 100
 """
 
@@ -15,7 +15,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
 from ltr.judgments import judgments_open
@@ -45,7 +45,7 @@ def main(argv=None):
     parser.add_argument('--val', required=True,
                         help='validation set, RankLib format (required — training without '
                              'one trains until the model has memorised the training data)')
-    parser.add_argument('--out-dir', default='Models')
+    parser.add_argument('--out-dir', default='train/trained_models')
     parser.add_argument('--name', default='lambdamart', help='filename prefix')
     parser.add_argument('--trees', type=int, default=500,  # madeup value
                         help='upper bound on boosting rounds; with --estop the jar saves the '

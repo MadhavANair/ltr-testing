@@ -17,8 +17,8 @@ Tree-structured Parzen Estimator. Optuna's own GPSampler needs PyTorch, which
 this repo has no other use for.
 
 Usage:
-    python3 scripts/val/tune.py \\
-        --train data/splits/train.txt --val data/splits/val.txt \\
+    python3 tune/tune.py \\
+        --train judgements/data/graded/train/train.txt --val judgements/data/graded/val/val.txt \\
         --n-trials 30 --folds 5
 """
 
@@ -37,7 +37,7 @@ import numpy as np
 from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ltr.judgments import judgments_open
 from ltr.ranklib import trainModel
@@ -45,7 +45,7 @@ from ltr.features import FEATURES
 
 
 def assign_fold(qid, fold_salt, folds):
-    # Stable hash, mirroring split_judgments.assign_split, so a search is
+    # Stable hash, so a search is
     # reproducible across runs.
     return int(hashlib.md5((str(qid) + fold_salt).encode('utf-8')).hexdigest(), 16) % folds
 
@@ -243,7 +243,7 @@ def main(argv=None):
     parser.add_argument('--out-dir', default=None,
                         help='keep fold models here; by default they go to a temp directory '
                              'that is deleted when the search ends')
-    parser.add_argument('--report-out', default='Models/tuning/tuning_report.json')
+    parser.add_argument('--report-out', default='tune/tuning_report.json')
     parser.add_argument('--top-n', type=int, default=3)
     args = parser.parse_args(argv)
 
@@ -420,7 +420,7 @@ def main(argv=None):
     print("\nbest config found — train the model you ship with it, on the ordinary "
           "train/val split:", file=sys.stderr)
     estop_arg = ' --estop %d' % best['estop'] if best['estop'] is not None else ' --estop 0'
-    print("  python3 scripts/train/train_lambdamart.py --train %s --val %s \\\n"
+    print("  python3 train/train_lambdamart.py --train %s --val %s \\\n"
           "      --trees %d --leaf %d --shrinkage %.4f --mls %d%s --metric %s"
           % (args.train, args.val, best['trees'], best['leaf'],
              best['shrinkage'], best['mls'], estop_arg, args.metric), file=sys.stderr)

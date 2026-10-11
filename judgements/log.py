@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""Logging script — the logged judgment list, features included (steps 1-2).
+"""Converts one or more graded CSVs into one RankLib-format file.
 
-Phase 1 has exactly one input shape: a combined grade+feature CSV drop (see
-mock-judgments-601-final.csv) — grade, qid, keywords, doc_id and the 13
-feature columns together in one file. This script reads that file directly
-and writes it straight to RankLib/SVMRank format, ready for training. There
-is no separate judgment-list-building stage: the feature columns are already
-on the row, so there is nothing to log from elsewhere.
+Each CSV row carries grade, QID, keywords, Image ID and the 13 feature
+columns (see ltr/features.py for the contract). All inputs are combined
+into --out. QIDs must be globally unique: the same QID with different
+keywords is an error.
 
-The feature contract (names, order, normalisation) lives in ltr/features.py.
+--disjoint-from lists the CSVs of the other sets (train/val when logging
+test, etc.); any query whose QID or keywords appears there is an error, so
+the set being logged never shares a query with them.
 
 Usage:
-    python scripts/train/log_judgments_with_features.py \\
-        --graded-csv data/raw/mock-judgments-601-final.csv \\
-        --out data/logged_with_features.txt
+    python3 judgements/log.py \\
+        --graded-csv judgements/data/raw/test/<name>.csv \\
+        --disjoint-from judgements/data/raw/train/*.csv judgements/data/raw/val/*.csv \\
+        --out judgements/data/graded/test/<name>.txt
 """
 
 import argparse
@@ -22,7 +23,7 @@ import os
 import sys
 from collections import Counter, OrderedDict
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ltr.judgments import Judgment, judgments_to_file
 from ltr.features import FEATURES, format_value
@@ -55,9 +56,46 @@ def read_graded_csv(path):
                 'doc_id': doc_id,
                 'grade': grade,
                 'keywords': (row.get('Keywords') or '').strip(),
+                'path': path,
                 'raw': row,
             })
     return rows
+
+
+def norm_keywords(keywords):
+    return ' '.join(keywords.lower().split())
+
+
+def check_qids_unique(rows):
+    """Same QID with different keywords means two queries would merge into one group."""
+    keywords_by_qid = {}
+    errors = []
+    for row in rows:
+        kw = norm_keywords(row['keywords'])
+        prev = keywords_by_qid.setdefault(row['qid'], (kw, row['path']))
+        if prev[0] != kw:
+            errors.append("QID %s is '%s' in %s but '%s' in %s"
+                          % (row['qid'], prev[0], prev[1], kw, row['path']))
+            keywords_by_qid[row['qid']] = (kw, row['path'])
+    return errors
+
+
+def check_disjoint(rows, other_paths):
+    """No QID or keywords may appear in both this set and other_paths."""
+    other_qids, other_keywords = {}, {}
+    for path in other_paths:
+        with open(path, newline='', encoding='utf-8-sig') as f:
+            for row in csv.DictReader(f):
+                other_qids.setdefault(int(row['QID']), path)
+                other_keywords.setdefault(norm_keywords(row.get('Keywords') or ''), path)
+    errors = set()
+    for row in rows:
+        kw = norm_keywords(row['keywords'])
+        if row['qid'] in other_qids:
+            errors.add("QID %s (%s) also in %s" % (row['qid'], row['path'], other_qids[row['qid']]))
+        if kw in other_keywords:
+            errors.add("query '%s' (%s) also in %s" % (kw, row['path'], other_keywords[kw]))
+    return sorted(errors)
 
 
 def dedupe(rows, report):
@@ -121,23 +159,31 @@ def validate(judgments, features):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--graded-csv', default='data/raw/mock-judgments-601-final.csv',  # madeup value
-                        help='the combined grade+feature CSV drop (default: %(default)s)')
-    parser.add_argument('--out', default='data/logged_with_features.txt',
-                        help='RankLib output path — grades + feature vectors, '
-                        'i.e. the logged judgment list (default: %(default)s)')
+    parser.add_argument('--graded-csv', nargs='+', required=True,
+                        help='one or more graded CSVs, combined into --out')
+    parser.add_argument('--out', required=True,
+                        help='RankLib output path (grades + feature vectors)')
+    parser.add_argument('--disjoint-from', nargs='*', default=[],
+                        help='CSVs of other sets that must share no QID or keywords with these')
     parser.add_argument('--keep-flat-queries', action='store_true',
                         help='keep queries whose docs all share one grade')
     args = parser.parse_args(argv)
 
     try:
-        rows = read_graded_csv(args.graded_csv)
-    except (OSError, ValueError) as e:
+        rows = [row for path in args.graded_csv for row in read_graded_csv(path)]
+        errors = check_qids_unique(rows) + check_disjoint(rows, args.disjoint_from)
+    except (OSError, ValueError, KeyError) as e:
         print("ERROR %s" % e, file=sys.stderr)
         return 1
 
+    if errors:
+        for err in errors[:20]:
+            print("ERROR %s" % err, file=sys.stderr)
+        print("%d error(s); nothing written." % len(errors), file=sys.stderr)
+        return 1
+
     if not rows:
-        print("ERROR %s produced zero rows" % args.graded_csv, file=sys.stderr)
+        print("ERROR %s produced zero rows" % ' '.join(args.graded_csv), file=sys.stderr)
         return 1
 
     report = Counter()
@@ -167,7 +213,7 @@ def main(argv=None):
         judgments_to_file(f, judgments)
 
     grades = Counter(j.grade for j in judgments)
-    print("input             : %s" % args.graded_csv, file=sys.stderr)
+    print("input             : %s" % ' '.join(args.graded_csv), file=sys.stderr)
     print("rows read         : %d" % report['rows_in'], file=sys.stderr)
     print("duplicates dropped: %d" % report['duplicates'], file=sys.stderr)
     print("flat queries drop : %d %s" % (report['flat_queries'],

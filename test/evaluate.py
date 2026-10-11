@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Score a test split with a trained model and report actual-vs-predicted NDCG@k."""
+"""Score a test split with a trained model and report actual-vs-predicted NDCG@k.
+
+Exits 0 if mean NDCG@k >= --min-ndcg, 2 if below, 1 on error. test/test.sh
+uses the exit code to decide which models move to deploy/models/. NDCG is the
+only check implemented; no other commercial-readiness checks exist yet.
+
+Input:  --model train/trained_models/<model>.txt
+        --test  judgements/data/graded/test/<name>.txt
+Output: stderr report; optional per-row CSV via --out
+"""
 
 import argparse
 import csv
@@ -9,7 +18,7 @@ import sys
 import tempfile
 from collections import defaultdict
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ltr.judgments import judgments_open as jdgment_open
 from ltr.ranklib import check_for_rankymcrankface
@@ -63,9 +72,11 @@ def ltr_ord(doc_ids, scores_by_doc):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--test', default='data/splits/test.txt')
+    parser.add_argument('--test', required=True, help='RankLib-format test file')
     parser.add_argument('--model', required=True)
     parser.add_argument('--k', type=int, default=10, help='the @k for NDCG (default: %(default)s)')
+    parser.add_argument('--min-ndcg', type=float, default=0.7,  # 0.7 from you; exit 2 below it
+                        help='pass threshold on mean NDCG@k (default: %(default)s)')
     parser.add_argument('--out', help='optional CSV path for the per-row actual-vs-predicted table')
     args = parser.parse_args(argv)
 
@@ -139,6 +150,10 @@ def main(argv=None):
     print("queries excluded  : %d (no relevant doc in list; NDCG undefined)" % excluded, file=sys.stderr)
     print("mean NDCG@%-3d     : %s" % (args.k, mean_ndcg), file=sys.stderr)
 
+    if mean_ndcg is None or mean_ndcg < args.min_ndcg:
+        print("FAIL mean NDCG@%d below %g" % (args.k, args.min_ndcg), file=sys.stderr)
+        return 2
+    print("PASS mean NDCG@%d >= %g" % (args.k, args.min_ndcg), file=sys.stderr)
     return 0
 
 
