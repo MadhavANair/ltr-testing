@@ -7,7 +7,7 @@ and uploads it to the `alamy_phase1` featureset. Run everything from
 ## Setup (once per machine)
 
 ```bash
-source venv/bin/activate          # or: python3 -m venv venv && source venv/bin/activate
+source ../venv2/bin/activate      # Learntorank/venv2, the shared venv for this pipeline
 pip install -r requirements.txt
 java -version                     # the trainer shells out to the RankyMcRankFace jar
 ```

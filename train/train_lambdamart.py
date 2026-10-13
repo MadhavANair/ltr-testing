@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Train LambdaMART. Writes one file: train/trained_models/<name>_<timestamp>.txt, the
 RankLib model, which is also a valid OpenSearch `model/ranklib` definition.
-The model path and its sha256 are printed to stderr.
+The model path is printed to stderr.
 
 Usage:
     python3 train/train_lambdamart.py \\
@@ -10,7 +10,6 @@ Usage:
 """
 
 import argparse
-import hashlib
 import os
 import sys
 from datetime import datetime, timezone
@@ -21,11 +20,6 @@ sys.path.insert(0, REPO_ROOT)
 from ltr.judgments import judgments_open
 from ltr.ranklib import trainModel
 from ltr.features import FEATURES
-
-
-def model_sha(model_path):
-    with open(model_path, 'rb') as f:
-        return hashlib.sha256(f.read()).hexdigest()
 
 
 def verify_feature_widths(judgments, features, source_label):
@@ -110,10 +104,6 @@ def main(argv=None):
         return 1
 
     print("model            : %s" % model_path, file=sys.stderr)
-
-    # --- model sha: identity of this model; upload-model uses it to skip duplicates ---
-    print("model sha256     : %s" % model_sha(model_path), file=sys.stderr)
-    # ---------------------------------------------------------------------------------
 
     return 0
 

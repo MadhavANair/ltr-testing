@@ -5,7 +5,7 @@ Run everything from `opensearch-ltr/`.
 ## Setup (once per machine)
 
 ```bash
-source venv/bin/activate
+source ../venv2/bin/activate
 pip install -r requirements.txt
 java -version
 ```
