@@ -1,0 +1,171 @@
+{
+  "featureset": {
+    "name": "alamy_phase1",
+    "features": [
+      {
+        "name": "caption_bm25",
+        "params": [
+          "keywords"
+        ],
+        "template_language": "mustache",
+        "template": {
+          "match": {
+            "caption": "{{keywords}}"
+          }
+        }
+      },
+      {
+        "name": "essential_words_bm25",
+        "params": [
+          "keywords"
+        ],
+        "template_language": "mustache",
+        "template": {
+          "match": {
+            "essential_words": "{{keywords}}"
+          }
+        }
+      },
+      {
+        "name": "main_words_bm25",
+        "params": [
+          "keywords"
+        ],
+        "template_language": "mustache",
+        "template": {
+          "match": {
+            "main_words": "{{keywords}}"
+          }
+        }
+      },
+      {
+        "name": "extra_words_bm25",
+        "params": [
+          "keywords"
+        ],
+        "template_language": "mustache",
+        "template": {
+          "match": {
+            "extra_words": "{{keywords}}"
+          }
+        }
+      },
+      {
+        "name": "description_bm25",
+        "params": [
+          "keywords"
+        ],
+        "template_language": "mustache",
+        "template": {
+          "match": {
+            "description": "{{keywords}}"
+          }
+        }
+      },
+      {
+        "name": "cross_fields_score",
+        "params": [
+          "keywords"
+        ],
+        "template_language": "mustache",
+        "template": {
+          "multi_match": {
+            "query": "{{keywords}}",
+            "fields": [
+              "caption",
+              "essential_words",
+              "main_words",
+              "extra_words",
+              "description"
+            ],
+            "type": "cross_fields"
+          }
+        }
+      },
+      {
+        "name": "pseudonym_rank",
+        "params": [
+          "keywords"
+        ],
+        "template_language": "mustache",
+        "template": {
+          "match": {
+            "pseudonym": "{{keywords}}"
+          }
+        }
+      },
+      {
+        "name": "image_boost",
+        "params": [
+          "keywords"
+        ],
+        "template_language": "mustache",
+        "template": {
+          "match": {
+            "image_boost": "{{keywords}}"
+          }
+        }
+      },
+      {
+        "name": "is_archive",
+        "params": [
+          "keywords"
+        ],
+        "template_language": "mustache",
+        "template": {
+          "match": {
+            "is_archive": "{{keywords}}"
+          }
+        }
+      },
+      {
+        "name": "is_black_and_white",
+        "params": [
+          "keywords"
+        ],
+        "template_language": "mustache",
+        "template": {
+          "match": {
+            "is_black_and_white": "{{keywords}}"
+          }
+        }
+      },
+      {
+        "name": "date_recency",
+        "params": [
+          "keywords"
+        ],
+        "template_language": "mustache",
+        "template": {
+          "match": {
+            "date_recency": "{{keywords}}"
+          }
+        }
+      },
+      {
+        "name": "is_premium_collection",
+        "params": [
+          "keywords"
+        ],
+        "template_language": "mustache",
+        "template": {
+          "match": {
+            "is_premium_collection": "{{keywords}}"
+          }
+        }
+      },
+      {
+        "name": "asset_type_photo",
+        "params": [
+          "keywords"
+        ],
+        "template_language": "mustache",
+        "template": {
+          "match": {
+            "asset_type": "{{keywords}}"
+          }
+        }
+      }
+    ]
+  }
+}

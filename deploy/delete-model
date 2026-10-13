@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Deletes a model from the local bot OpenSearch. Leaves the featureset in place.
+# Usage: ./deploy/delete-model [deploy/models/<model>.txt | <model name>]
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+model=${1:-$(ls -t deploy/models/lambdamart_*.txt | head -1)}
+name=$(basename "${model%.txt}")
+
+echo "Deleting model $name..."
+curl --fail-with-body -X DELETE "http://localhost:9201/_ltr/_model/$name"

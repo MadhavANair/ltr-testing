@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Uploads one model to featureset alamy_phase1 on the local bot OpenSearch
+# (after local-dev/scripts/create-index). Skips if alamy_phase1 already has a
+# model; remove it first with ./deploy/delete-model.
+# Usage: ./deploy/upload-model [deploy/models/<model>.txt]
+#
+# Input:  deploy/models/lambdamart_<ts>.txt   (default: newest, from test/test.sh)
+#         deploy/featureset.json              (alamy_phase1 feature definitions)
+# Output: featureset + model on http://localhost:9201 (nothing written to disk)
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+model=${1:-$(ls -t deploy/models/lambdamart_*.txt | head -1)}
+name=$(basename "${model%.txt}")
+featureset=deploy/featureset.json
+
+# RankLib scores by feature POSITION, so featureset.json must list features in
+# the order the model was trained on (ltr/features.py).
+python3 -c "
+import json, sys
+from ltr.features import FEATURES
+names = [f['name'] for f in json.load(open('$featureset'))['featureset']['features']]
+expected = [f.name for f in FEATURES]
+if names != expected:
+    sys.exit('$featureset order does not match ltr/features.py:\n  featureset:  %s\n  features.py: %s' % (names, expected))
+"
+
+echo "Waiting for bot OpenSearch domain to start..."
+for _ in $(seq 30); do
+  curl -s "http://localhost:9201" > /dev/null && break
+  sleep 2
+done
+curl -s "http://localhost:9201" > /dev/null || {
+  echo "Bot domain not reachable on :9201 after 60s. Start it with:"
+  echo "  cd opensearch-ingest/opensearch-ingest/local-dev && docker compose up -d && ./scripts/create-index"
+  exit 1
+}
+echo "Bot domain ready"
+
+echo "Creating LTR feature store..."
+# PUT errors if the store already exists, so check it with a GET afterwards instead.
+curl -s -o /dev/null -X PUT "http://localhost:9201/_ltr"
+curl -s --fail "http://localhost:9201/_ltr" > /dev/null
+
+remote=$(curl -s "http://localhost:9201/_ltr/_featureset/alamy_phase1")
+if [ "$(jq -r '.found' <<<"$remote")" = true ]; then
+  # Features are addressed by position, so a mismatched featureset scores garbage silently.
+  if ! diff <(jq -S '.featureset.features' $featureset) <(jq -S '._source.featureset.features' <<<"$remote") > /dev/null; then
+    echo "Featureset alamy_phase1 on the cluster differs from $featureset."
+    echo "Delete it (curl -X DELETE http://localhost:9201/_ltr/_featureset/alamy_phase1) and re-run."
+    exit 1
+  fi
+  echo "Featureset alamy_phase1 already present and matches"
+else
+  echo "Creating alamy_phase1 featureset..."
+  curl --fail-with-body -X PUT "http://localhost:9201/_ltr/_featureset/alamy_phase1" -H "Content-Type: application/json" --data @$featureset
+  echo
+fi
+
+# One model per featureset: skip if alamy_phase1 already has one.
+curl -s -X POST "http://localhost:9201/.ltrstore/_refresh" > /dev/null
+existing=$(curl -s "http://localhost:9201/_ltr/_model?size=1000" | jq -r '[.hits.hits[]._source | select((.model.feature_set.name // "alamy_phase1") == "alamy_phase1") | .name] | join(" ")')
+if [ -n "$existing" ]; then
+  echo "alamy_phase1 already has model(s): $existing. Skipping upload of $name."
+  echo "Delete first with: ./deploy/delete-model <model name>"
+  exit 0
+fi
+
+echo "Uploading model $name..."
+# The .txt is the ranklib definition as-is; jq --rawfile embeds it without truncation.
+jq -n --arg name "$name" --rawfile def "$model" '{model: {name: $name, model: {type: "model/ranklib", definition: $def}}}' \
+  | curl --fail-with-body -X POST "http://localhost:9201/_ltr/_featureset/alamy_phase1/_createmodel" -H "Content-Type: application/json" --data @-
+echo
